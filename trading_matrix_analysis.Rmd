@@ -1,0 +1,49 @@
+---
+title: "Analysis of FAO Trading Data"
+author: "David Simons, Guillaume Fournie"
+date: "`r format(Sys.time(), '%A %d %B %Y')`"
+output:
+  html_document:
+    code_folding: hide
+    highlight: zenburn
+    number_sections: yes
+    theme: spacelab
+    toc: yes
+    toc_collapse: no
+    toc_depth: 4
+    toc_float: yes
+    css: !expr here::here('css', 'style.css')
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,
+                      collapse = TRUE,
+                      fig.width = 8,
+                      fig.height = 4,
+                      dpi = 150,
+                      warning = FALSE,
+                      message = FALSE)
+```
+
+# Data preparation {.tabset .tabset-fade .tabset-pills}
+
+## Outline
+
+* **Load scripts**: loads libraries and useful scripts used in the analyses;
+
+* **Load data**: imports datasets.
+
+```{r libraries}
+library('tidyverse')
+library('janitor')
+```
+
+## Load scripts
+
+The only scripts so far are the general data cleaning functions and the Edge_to_Adjacent function
+
+```{r load_scripts}
+
+
+```
+
