@@ -55,7 +55,7 @@ lc_2010_weighted$numclusters #When incorporating weighting there are fewer numbe
 
 plot(lc_2010_weighted, type = "graph", layout = layout.fruchterman.reingold)
 plot(lc_2010_weighted, type = "graph", layout = layout.fruchterman.reingold, shownodesin = 3)
-plot(lc_2010_weighted, type = "graph", layout = layout.fruchterman.reingold, shownodesin = 4) #The members can be displayed for specific communities
+plot(lc_2010_weighted, type = "graph", layout = layout.fruchterman.reingold, shownodesin = 2) #The members can be displayed for specific communities
 plot(lc_2010_weighted, type = "members") #Plot displaying community membership
 
 

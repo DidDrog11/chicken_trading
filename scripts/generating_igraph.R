@@ -1,7 +1,7 @@
 library(tidyverse)
 library(igraph)
 library(here)
-library(ndtv)
+
 nodelist_complete <- read_rds(here('cleaned_data', 'complete_nodelist.rds'))
 
 production_heads <- read.csv(here('cleaned_data', 'production_heads_long.csv')) %>%
@@ -70,6 +70,7 @@ edgelist_igraph <- edgelist_file %>%
 graph <- graph_from_data_frame(edgelist_igraph, directed = T, vertices = nodelist_igraph)
 graph <- set_edge_attr(graph, 'weight', value = edgelist_igraph$greatest)
 graph
+plot(graph)
 
 
 V(graph)$community <- V(graph)$producer_region_name
