@@ -62,6 +62,8 @@ nodelist_igraph <- nodelist_complete %>%
             by = 'country') %>%
   distinct()
   
+write_rds(nodelist_igraph, here("cleaned_data", "nodelist_igraph_heads.rds"))
+write_rds(edgelist_file, here("cleaned_data", "edgelist_igraph_heads.rds"))
 
 #Complete igraph
 edgelist_igraph <- edgelist_file %>%
