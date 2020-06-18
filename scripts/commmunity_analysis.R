@@ -1,4 +1,15 @@
-nodelist <- read_rds(here::here("cleaned_data", "nodelist_igraph_heads.rds"))
+library(tidyverse)
+library(igraph)
+
+nodelist <- read_rds(here::here("cleaned_data", "nodelist_igraph_heads.rds")) %>%
+  mutate(producer_region_name = ifelse(country %in% c("belgiumluxembourg", "czechoslovakia", "faroe_islands", "greenland", "serbia_and_montenegro", "ussr", "yugoslav_sfr"),
+                                       "europe", as.character(producer_region_name)),
+         producer_region_name = ifelse(country %in% c("cote_divoire", "djibouti", "ethiopia_pdr", "sudan_former", "reunion"),
+                                       "africa", as.character(producer_region_name)),
+         producer_region_name = ifelse(country == "aruba", "americas", producer_region_name),
+         producer_region_name = ifelse(country %in% c("british_indian_ocean_territory", "china_mainland", "maldives"), "asia",
+                                       as.character(producer_region_name)),
+         producer_region_name = ifelse(country == "unspecified_area", "unknown", as.character(producer_region_name)))
 edgelist <- read_rds(here::here("cleaned_data", "edgelist_igraph_heads.rds"))
 
 graph <- graph_from_data_frame(edgelist, directed = T, vertices = nodelist)
@@ -76,3 +87,74 @@ india <- ggplot() +
                      node_bounds_india["long", "max"]),
             ylim = c(node_bounds_india["lat", "min"],
                      node_bounds_india["lat", "max"]))
+
+
+# Edge density and assortativity ------------------------------------------------------------
+
+edge_density(graph_2010)
+values_region <-  as.numeric(factor(V(graph_2010)$producer_region_name))
+observed_assortativity <- assortativity(graph_2010, values_region) #there is assortativity based on region
+assortativity.degree(graph_2010, directed = T) #highly connected nodes do not preferrentially connect to other highly connected nodes.
+
+results <- vector('list', 1000)
+for(i in 1:1000){
+  results[[i]] <- assortativity(graph_2010, sample(values_region))
+}
+
+ggplot(data =as.data.frame(unlist(results)), aes(x = unlist(results)))+
+  geom_histogram()+
+  geom_vline(xintercept = observed_assortativity)
+
+
+# Community assessment in igraph ------------------------------------------
+
+walktrap_2010 <- walktrap.community(graph_2010, weights = E(graph_2010)$greatest, merges = T, steps = 5, membership = T)
+plot(walktrap_2010, graph_2010)
+membership(walktrap_2010)
+sizes(walktrap_2010)
+
+infomap_community_2010 <- infomap.community(graph_2010, e.weights = E(graph_2010)$greatest)
+plot(infomap_community_2010, graph_2010)
+membership <- membership(infomap_community_2010)
+sizes(infomap_community_2010)
+graph_2010 <- set_vertex_attr(graph_2010, "community", value = c(membership))
+
+graph_year <- vector("list", n_distinct(E(graph)$year))
+names(graph_year) <- sort(unique(E(graph)$year))
+walktrap_community <- vector("list", n_distinct(E(graph)$year))
+names(walktrap_community) <- sort(unique(E(graph)$year))
+membership <- vector("list", n_distinct(E(graph)$year))
+names(membership) <- sort(unique(E(graph)$year))
+country_communities <- vector("list", n_distinct(E(graph)$year))
+names(country_communities) <- sort(unique(E(graph)$year))
+largest_community <- vector("list", n_distinct(E(graph)$year))
+names(largest_community) <- sort(unique(E(graph)$year))
+sub_community <- vector("list", n_distinct(E(graph)$year))
+names(sub_community) <- sort(unique(E(graph)$year))
+sub_community_membership <- vector("list", n_distinct(E(graph)$year))
+names(sub_community_membership) <- sort(unique(E(graph)$year))
+
+
+for (i in names(graph_year)) {
+  graph_year[[i]] <- subgraph.edges(graph, E(graph)[year == i], delete.vertices = TRUE)
+  walktrap_community[[i]] <- walktrap.community(graph_year[[i]], weights = E(graph_year[[i]])$greatest, merges = T, steps = 5, membership = T)
+  membership[[i]] <- membership(walktrap_community[[i]])
+  graph_year[[i]] <- set_vertex_attr(graph_year[[i]], "community", value = c(membership[[i]]))
+  country_communities[[i]] <- cbind(get.vertex.attribute(graph_year[[i]], "name"), get.vertex.attribute(graph_year[[i]], "community"))
+  largest_community[[i]] <- induced_subgraph(graph_year[[i]], which(membership(walktrap_community[[i]]) ==  which.max(sizes(walktrap_community[[i]]))))
+  sub_community[[i]] <- walktrap.community(largest_community[[i]], weights = E(largest_community[[i]])$greatest, merges = T, steps = 5, membership = T)
+  sub_community_membership[[i]] <- membership(sub_community[[i]])
+}
+
+communities <- plyr::ldply(country_communities, data.frame) %>%
+  rename("year" = 1,
+         "country" = 2,
+         "community" = 3) %>%
+  pivot_wider(names_from = year, values_from = community)
+communities
+
+
+largest_community[["2010"]] <- induced_subgraph(graph_year[["2010"]], which(membership(walktrap_community[["2010"]]) ==  which.max(sizes(walktrap_community[["2010"]]))))
+sub_community[["2010"]] <- walktrap.community(largest_community[["2010"]], weights = E(largest_community[["2010"]])$greatest, merges = T, steps = 5, membership = T)
+sub_community_membership[["2014"]] <- membership(sub_community[["2010"]])
+graph_year[["2010"]] <- set_vertex_attr(graph_year[["2010"]], "sub_community", value = c(sub_community_membership[["2010"]]))

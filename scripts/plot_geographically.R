@@ -85,14 +85,20 @@ nodelist_europe <- nodelist %>%
   filter(producer_region_name == "europe")
 
 node_bounds_europe <- nodelist_europe %>%
-  select(long, lat) %>%
   drop_na %>%
+  select(long, lat) %>%
   sp::SpatialPointsDataFrame(coords = .[,1:2], data = .) %>%
   sp::bbox() * 1.1
 
 betweenness_europe <- stack(betweenness(europe_graph_2010, directed = T)) %>%
   rename("country" = 2,
          "betweenness" = 1)
+
+walktrap_2010 <- walktrap.community(europe_graph_2010, weights = E(europe_graph_2010)$greatest, merges = T, membership = T)
+membership <- membership(walktrap_2010)
+sizes(walktrap_2010)
+europe_graph_2010 <- set_vertex_attr(europe_graph_2010, "community", value = c(membership))
+nodelist_europe$community <- factor(get.vertex.attribute(europe_graph_2010, "community"))
 
 nodelist_europe <- nodelist_europe %>%
   full_join(., betweenness_europe, by = "country")
@@ -112,7 +118,7 @@ europe_trade <- ggplot() +
                alpha = 0.5) +
   geom_point(data = nodelist_europe,
              aes(long, lat,
-                 size = sqrt(betweenness)+1), color = "red") +
+                 colour = community)) +
   theme_bw() +
   theme(axis.line = element_line(),
         panel.grid.major = element_blank(),
