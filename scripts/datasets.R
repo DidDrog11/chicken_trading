@@ -1,5 +1,8 @@
-source(here('scripts', 'geographic_regions.R'))
 library('janitor')
+library("here")
+
+source(here('scripts', 'geographic_regions.R'))
+
 
 production_heads_wide <- Production_meat_labelled %>%
   pivot_wider(id_cols = year, values_from = heads, names_from = c(country)) %>%

@@ -2,6 +2,7 @@ library('tidyverse')
 library('data.table')
 library('igraph')
 library('ggplot2')
+
 source(here('scripts', 'data_cleaning_functions.R'))
 source(here('Plot production.R'))
 

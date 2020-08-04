@@ -1,8 +1,8 @@
 # By geographic region ----------------------------------------------------
-source(here('Plot production.R'))
+#source(here('Plot production.R'))
 source(here('scripts', 'data_cleaning_functions.R'))
 source(here('scripts', 'data_cleaning_v2.R'))
-source(here('Country_compiling.R'))
+#source(here('Country_compiling.R'))
 library('maptools')
 
 data("wrld_simpl")
