@@ -15,7 +15,7 @@ edgelist <- read_rds(here::here("cleaned_data", "edgelist_igraph_heads.rds"))
 graph <- graph_from_data_frame(edgelist, directed = T, vertices = nodelist)
 
 vertex_attr(graph)
-edge_attr(graph)
+edge_attr(graph[[2]])
 
 table(head_of(graph, E(graph)[[year == 2010]]))
 graph_2010 <- subgraph.edges(graph, E(graph)[year == 2010], delete.vertices = TRUE)
@@ -40,6 +40,10 @@ distances <- as.data.frame(t(distances(india_trade_2010, "india"))) %>%
 distances$distance <- as.factor(distances$distance)
 
 edgelist_coordinates <- as_edgelist(india_trade_2010) %>%
+  rename("origin" = 1,
+         "destination" = 2)
+  left_join(., wrld_simpl@data %>%
+              select("ISO3", "LON", "LAT"))
   as_tibble() %>%
   full_join(nodelist, by = c("V1" = "country")) %>%
   full_join(nodelist, by = c("V2" = "country")) %>%
