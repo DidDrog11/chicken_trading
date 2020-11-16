@@ -499,7 +499,7 @@ Each country in the dataset will form a node for our subsequent analysis, trades
 
 ### Producing the edgelist
 
-Similarly to the production data country names have changed. We are unable to perform similar imputation to the production data. We will therefor perform a more limited analysis of this data.
+Similarly to the production data country names have changed. We are unable to perform similar imputation to the production data. We will therefore perform a more limited analysis of the data for these countries.
 
 The nodelist and edgelist are produced from these trading data.
 ``` {r, detailed_trading_cleaning, cache = T}
@@ -581,24 +581,69 @@ EdgeLists <- EdgeLists %>%
             by = "Receiver Country Code") %>%
   dplyr::select("Sender Country Code", "Sender Country Name", "Receiver Country Code", "Receiver Country Name", "Year",
          "1000Head_IMP", "1000Head_EXP", "1000USD_IMP", "1000USD_EXP") #Unfortunately I have written a lot of the code referencing these column heads, ultimately the edgelist is more useful than EdgeLists but I'll keep both for now.
+write_rds(EdgeLists, here("cleaned_data", "edge_list.rds"))
+}
+```
+The data is produced from both the exporting and importing countries submissions to the FAO. This has led to discrepencies in the data where one party doesn't report any trading activity between the states or the amounts of chickens traded are very different. We have presented the scale of these discrepencies below. We have used the mean of the reported number of heads (1000 heads) where both countries have reported values. When one of the countries has reported data but the other has not we have used the value reported.
+``` {r updated_edgelist}
 
-edgelist <- EdgeLists %>%
-  rename("sender_iso3" = `Sender Country Code`,
-         "sender_country_name" = `Sender Country Name`,
-         "receiver_iso3" = `Receiver Country Code`,
-         "receiver_country_name" = `Receiver Country Name`,
-         "year" = Year,
-         "import_head" = `1000Head_IMP`,
-         "export_head" = `1000Head_EXP`,
-         "import_usd" = `1000USD_IMP`,
-         "export_usd" = `1000USD_EXP`) %>%
-  mutate(import = ifelse(import_head > 0, import_head,
-                         ifelse(import_usd > 0, 1, 0)),
-         export = ifelse(export_head > 0, export_head,
-                         ifelse(export_usd > 0, 1, 0)),
+detailed_trading <- read_csv(here("FAOStat_Data", "Detailed_Trading_Matrix.csv")) %>%
+  dplyr::select(-c(`Reporter Country Code`, `Partner Country Code`)) %>%
+  mutate_if(., is.character,
+            stringr::str_replace_all, pattern = "China, mainland", replacement = "China") %>%
+  left_join(., world_data %>%
+              dplyr::select(iso3, country) %>%
+              mutate(`Reporter Countries` = country) %>%
+              rename("Reporter Country Code" = iso3) %>%
+              dplyr::select(-country),
+            by = "Reporter Countries") %>%
+  left_join(., world_data %>%
+              dplyr::select(iso3, country) %>%
+              mutate(`Partner Countries` = country) %>%
+              rename("Partner Country Code" = iso3) %>%
+              dplyr::select(-country),
+            by = "Partner Countries") %>%
+  drop_na("Reporter Country Code", "Partner Country Code")
+
+detailed_trading <- as.data.frame(detailed_trading) %>%
+  mutate(year = as.numeric(Year),
+         Value = as.numeric(Value),
+         Element = ifelse(Element %in% c("Import Quantity", "Import Value"), "Import", "Export")) %>%
+  select(`Reporter Country Code`, `Partner Country Code`, Element, year, Unit, Value) %>%
+  mutate(sender_iso3 = ifelse(Element == "Export",`Reporter Country Code`, `Partner Country Code`),
+         receiver_iso3 = ifelse(Element == "Import", `Reporter Country Code`, `Partner Country Code`)) %>%
+  mutate(Unit = recode(Unit, "1000 Head" = "head", "1000 US$" = "usd"),
+         element = recode(Element, "Import" = "import", "Export" = "export"),
+         trade = paste0(element, "_", Unit)) %>%
+  select(sender_iso3, receiver_iso3, year, trade, Value) %>%
+  pivot_wider(., names_from = trade, values_from = Value) %>%
+  mutate_at(c(4:9), ~replace(., is.na(.), 0)) %>%
+  select(-c(import_tonnes, export_tonnes))  %>%
+  rename("reported_import_head" = import_head,
+         "reported_import_usd" = import_usd,
+         "reported_export_head" = export_head,
+         "reported_export_usd" = export_usd) %>%
+  mutate(difference_head = reported_export_head-reported_import_head,
+         difference_usd = reported_export_usd-reported_import_usd) %>%
+  mutate(import = ifelse(reported_import_head > 0, reported_import_head,
+                         ifelse(reported_import_usd > 0, 1, 0)),
+         export = ifelse(reported_export_head > 0, reported_export_head,
+                         ifelse(reported_export_usd > 0, 1, 0)),
          greatest = ifelse(import >= export, import, export),
-         mean = ceiling(rowMeans(data.frame(import, export)))) %>%
-  select(-c("import_head", "export_head", "import_usd", "export_usd"))%>%
+         mean = ceiling(rowMeans(data.frame(ifelse(import == 0,
+                                                   export,
+                                                   import),
+                                            ifelse(export == 0,
+                                                   import,
+                                                   export)))))
+
+edgelist <- detailed_trading %>%
+  select(-c("reported_import_head",
+            "reported_export_head",
+            "reported_import_usd", 
+            "reported_export_usd",
+            "difference_head",
+            "difference_usd"))%>%
   left_join(., world_data %>%
               dplyr::select(iso3, region, subregion) %>%
               rename("sender_iso3" = iso3,
@@ -617,21 +662,18 @@ edgelist <- EdgeLists %>%
          receiver_subregion = plyr::mapvalues(receiver_subregion, sub_region_names, names(sub_region_names)))
 
 
-write_rds(EdgeLists, here("cleaned_data", "edge_list.rds"))
+
 write_rds(edgelist, here("cleaned_data", "edgelist_updated.rds"))
-}
+
 EdgeLists <- read_rds(here("cleaned_data", "edge_list.rds"))
 edgelist <- read_rds(here("cleaned_data", "edgelist_updated.rds"))
 ```
 The edgelist for chicken trade in 1000 heads has been produced and saved locally to `cleaned_data/edge_list.rds`.
 ``` {r, nodelist_creation}
 if(!file.exists(here("cleaned_data", "nodelist_all.rds"))) {
-EdgeLists <- read_rds(here("cleaned_data", "edge_list.rds"))
+edgelist <- read_rds(here("cleaned_data", "edgelist_updated.rds"))
 
-nodelist_all <- EdgeLists %>%
-  rename(sender_iso3 = `Sender Country Code`,
-         receiver_iso3 = `Receiver Country Code`,
-         year = Year) %>%
+nodelist_all <- edgelist %>%
   select(sender_iso3, receiver_iso3)
 nodelist_all <- c(nodelist_all$sender_iso3, nodelist_all$receiver_iso3)
 nodelist_all <- unique(nodelist_all)
@@ -777,17 +819,17 @@ Global chicken production has increased from around 2 chickens/person/year globa
 The trading networks have been recreated for 1986-2017. Some trades are reported for less than 1000 heads of chickens despite having a USD amount associated with the trade, in these cases we will set the amount of chickens traded as 1 which equates to 1000 heads of chicken.
 ``` {r chicken_import}
 if(!file.exists(here("outputs", "worldimportation.gif"))){
-Imports <- EdgeLists %>%
-  dplyr::select(`Receiver Country Code`,`Receiver Country Name`, Year, `1000Head_IMP`) %>%
-  rename("iso3" = `Receiver Country Code`,
-         "country" = `Receiver Country Name`,
-         "import" = `1000Head_IMP`) %>%
+Imports <- edgelist %>%
+  dplyr::select(receiver_iso3, year, mean) %>%
+  rename("iso3" = receiver_iso3) %>%
   left_join(., global_historical_pop %>%
               dplyr::select(-Country) %>%
-              rename("population" = Value), by = c("iso3", "Year")) %>%
-  group_by(iso3, country, Year, population) %>%
-  summarise(import = sum(import)*1000) %>%
-  filter(!(country == "Slovakia" & Year == 1999)) %>%
+              rename("population" = Value,
+                     "year" = Year),
+            by = c("iso3", "year")) %>%
+  group_by(iso3, year, population) %>%
+  summarise(import = sum(mean)*1000) %>%
+  filter(!(iso3 == "SVK" & year == 1999)) %>%
   mutate(per_capita = import/population) %>%
   dplyr::select(-c(population)) %>%
   drop_na()
@@ -804,7 +846,7 @@ world_imp <- World %>%
   drop_na()
 
 ggplot_anim_imp <- ggplot()+
-  geom_sf(data = world_imp, aes(fill = decile, group = Year)) +
+  geom_sf(data = world_imp, aes(fill = decile, group = year)) +
   geom_sf(data = World, fill = NA) +
   scale_fill_manual(values = cols) +
   labs(title = "World per capita chicken import",
@@ -812,25 +854,25 @@ ggplot_anim_imp <- ggplot()+
        fill = "Importation/capita rank",
        caption = "Data source: FAO Stat") +
   theme_minimal()+
-  transition_manual(frames = Year)
+  transition_manual(frames = year)
 
-world_imp_gif <- animate(ggplot_anim_imp, nframes = length(unique(world_imp$Year)), fps = 1, end_pause = 10)
+world_imp_gif <- animate(ggplot_anim_imp, nframes = length(unique(world_imp$year)), fps = 1, end_pause = 10)
 anim_save(here("outputs", "worldimportation.gif"), animation = world_imp_gif)
 }
 ```
 ![Animated chicken importation rank 1986-2017](outputs/worldimportation.gif)
 ``` {r chicken_export}
 if(!file.exists(here("outputs", "worldexportation.gif"))){
-Exports <- EdgeLists %>%
-  dplyr::select(`Sender Country Code`,`Sender Country Name`, Year, `1000Head_EXP`) %>%
-  rename("iso3" = `Sender Country Code`,
-         "country" = `Sender Country Name`,
-         "export" = `1000Head_EXP`) %>%
+Exports <- edgelist %>%
+  dplyr::select(sender_iso3, year, mean) %>%
+  rename("iso3" = sender_iso3) %>%
   left_join(., global_historical_pop %>%
               dplyr::select(-Country) %>%
-              rename("population" = Value), by = c("iso3", "Year")) %>%
-  group_by(iso3, country, Year, population) %>%
-  summarise(export = sum(export)*1000) %>%
+              rename("population" = Value,
+                     "year" = Year),
+            by = c("iso3", "year")) %>%
+  group_by(iso3, year, population) %>%
+  summarise(export = sum(mean)*1000) %>%
   mutate(per_capita = export/population) %>%
   dplyr::select(-c(population)) %>%
   drop_na()
@@ -847,7 +889,7 @@ world_exp <- World %>%
   drop_na()
 
 ggplot_anim_exp <- ggplot()+
-  geom_sf(data = world_exp, aes(fill = decile, group = Year)) +
+  geom_sf(data = world_exp, aes(fill = decile, group = year)) +
   geom_sf(data = World, fill = NA) +
   scale_fill_manual(values = cols) +
   labs(title = "World per capita chicken export",
@@ -855,9 +897,9 @@ ggplot_anim_exp <- ggplot()+
        fill = "Exportation/capita rank",
        caption = "Data source: FAO Stat") +
   theme_minimal()+
-  transition_manual(frames = Year)
+  transition_manual(frames = year)
 
-world_exp_gif <- animate(ggplot_anim_exp, nframes = length(unique(world_exp$Year)), fps = 1, end_pause = 10)
+world_exp_gif <- animate(ggplot_anim_exp, nframes = length(unique(world_exp$year)), fps = 1, end_pause = 10)
 anim_save(here("outputs", "worldexportation.gif"), animation = world_exp_gif)
 }
 ```
@@ -865,7 +907,7 @@ anim_save(here("outputs", "worldexportation.gif"), animation = world_exp_gif)
 ![Animated chicken export rank 1986-2017](outputs/worldexportation.gif)
 
 ## FAO reporting discrepencies
-There are some large discrepencies in the dataset between the amount of chickens reported by the exporting or importing countries. For this analysis I have taken the greatest number reported by either the receiver or sender and also the mean of the two. The below histograms show the result of this approach. I have explored the countries reporting more than 100,000 (1000 head) trading years but there are likely many more smaller errors in the data.
+There are some discrepencies in the dataset between the amount of chickens reported by the exporting or importing countries. For this analysis I have taken the greatest number reported by either the receiver or sender and also the mean of the two. The below histograms show the result of this approach. I have explored the countries reporting more than 100,000 (1000 head) trading years but there are likely many more smaller errors in the data.
 ``` {r export_histogram}
 export_distribution <- edgelist %>%
   group_by(sender_iso3, year) %>%
@@ -883,7 +925,53 @@ plot_grid(
 export_distribution %>%
   arrange(-greatest_export) %>%
   filter(greatest_export > 100000)
+
+detailed_trading %>%
+  filter(difference_head < 100000 & difference_head > -100000) %>%
+  ggplot(data = .) +
+  geom_histogram(aes(x = difference_head)) +
+  scale_y_sqrt() +
+  labs(title = "Distribution of discrepencies in recording",
+       x = "Difference between amount recorded by exporter and importer")
+  
+trade_difference <- detailed_trading %>%
+  group_by(year, sender_iso3, receiver_iso3, difference_head) %>%
+  summarise(trades = n()) %>%
+  ungroup() %>%
+  group_by(year)
+
+all_trades <- count(no_diff, trades) %>%
+  rename("all_trades" = n) %>%
+  mutate(year = factor(year)) %>%
+  select(year, all_trades)
+
+no_diff <- trade_difference %>%
+  filter(difference_head == 0)  %>%
+  mutate(year = factor(year)) %>%
+  group_by(year) %>%
+  summarise(null_trades = n()) %>%
+  left_join(., all_trades, by = "year") %>%
+  pivot_longer(., 2:3, names_to = "trade", values_to = "values")
+
+ggplot(data = no_diff, aes(x = year, y = values, fill = trade)) +
+  geom_col() +
+  labs(title = "Number of trades with no discrepency") +
+  theme(axis.text.x = element_text(angle = 90))
+
+small_diff <- detailed_trading %>%
+  filter(difference_head < 1000 & difference_head > -1000) %>%
+  mutate(year = factor(year))
+
+ggplot(data = small_diff, aes(difference_head, colour = year)) +
+  geom_freqpoly() +
+  scale_y_sqrt() +
+  labs(title = "Distribution of discrepencies in recording where less than 1000",
+       x = "Difference between amount recorded by exporter and importer")
+
+large_diff <- detailed_trading %>%
+  filter(!difference_head < 1000 | !difference_head > -1000)
 ```
+
 Most trades are for small amounts of chickens, however there are some very large outliers. These outliers may be due to very large trades from high producing countries or errors in the recording. When looking at the difference between the largest and mean of exported chickens for countries with over 100,000 (1000 heads) similar countries report high levels of export. Hungary in 1999 seems to be an error here as this is the only year it is present at this level and there is a large discrepancy between the greatest value and the mean.
 ``` {r import_histogram}
 import_distribution <- edgelist %>%
@@ -1063,6 +1151,8 @@ We can create sub-graphs to look at specific years. For example the graph for 19
 ## Dynamic network analysis
 An alternative way to investigate the dataset is through a dynamic network, this uses the `tsna` package to generate a timeseries of the network.
 ``` {r tsna_graph_production}
+if(!file.exists(here("cleaned_data", "nD_graph.rds")))
+  {
 nodelist <- read_rds(here("cleaned_data", "nodelist_all.rds"))
 data("World")
 
@@ -1111,6 +1201,10 @@ nD_graph%n%"net.obs.period" <- list(
   time.unit = "year"
 )
 set.vertex.attribute(nD_graph, "geometry", tsna_node$geometry)
+write_rds(nD_graph, here("cleaned_data", "nD_graph.rds"))
+}
+
+nD_graph <- read_rds(here("cleaned_data", "nD_graph.rds"))
 ```
 These graphs describe the trading network over time.
 ``` {r time_series_edges}
@@ -1184,6 +1278,8 @@ This shows the density of the network, as can be seen it is generally a sparse n
     + `r names(unique(neighbors(graph[["2002"]], "USA", mode = c("all"))))`
 
 During a year a country may import and export to another, for example above we can see that the US imported from and exported to the UK (GBR) and France (GRA) in 1992. However, 2002 it continued to have bilateral trade with the UK but it was only exporting to France. *It would be nice to find a way to show this graphically as a matrix over time*
+
+### Egocentric mapping
 
 We can alternatively explore this types of relationships through diagrams of egocentric graphs. Here we set the USA as the focus of our interest.
 ``` {r egocentric}
@@ -1266,6 +1362,130 @@ ggsave("USA_trade_map_2002.png", usa_trade_map, path = here("outputs"))
 ```
 ![USA egocentric trade map 2002](outputs/USA_trade_map_2002.png)
 Here we show the USA as the centre of the trading network, as can be seen the node is reporting distance 0. The countries it has a direct import or export relationship with are therefore 1 node distant. The subsequent countries that it is connected to through these nodes are therefore 2 nodes distant. The remainder of the countries are 3 nodes distant.
+
+### National trading networks
+
+``` {r national_map}
+trade_map_1986 <- edgelist %>%
+  filter(year == "1986") %>%
+  select(sender_iso3, receiver_iso3, mean) %>%
+  left_join(., wrld_simpl@data %>%
+              select("ISO3", "LON", "LAT") %>%
+              rename("sender_iso3" = "ISO3",
+                     "sender_long" = "LON",
+                     "sender_lat" = "LAT"),
+            by = "sender_iso3") %>%
+  left_join(., wrld_simpl@data %>%
+              select("ISO3", "LON", "LAT") %>%
+              rename("receiver_iso3" = "ISO3",
+                     "receiver_long" = "LON",
+                     "receiver_lat" = "LAT"),
+            by = "receiver_iso3")
+
+exporters_1986 <- trade_map_1986 %>%
+  group_by(sender_iso3) %>%
+  summarise(export_value = sum(mean)) %>%
+  filter(export_value > 1) %>%
+  mutate(quartile = ntile(export_value, 3),
+         quartile = factor(quartile, levels = c(1, 2, 3), labels = c("Low", "Medium", "High")))
+
+importers_1986 <- trade_map_1986 %>%
+  group_by(receiver_iso3) %>%
+  summarise(import_value = sum(mean)) %>%
+  filter(import_value > 1) %>%
+  mutate(quartile = factor(
+    ntile(import_value, 3),
+    levels = c(1, 2, 3), labels = c("Low", "Medium", "High")))
+
+net_exporters_1986 <- exporters_1986 %>%
+  left_join(., importers_1986 %>%
+              select(-quartile),
+            by = c("sender_iso3" = "receiver_iso3" )) %>%
+  mutate(import_value = ifelse(is.na(import_value), 0, import_value),
+         net_export = export_value-import_value) %>%
+  filter(net_export > 0) %>%
+  select(-c(quartile, export_value, import_value)) %>%
+  mutate(export_level = factor(
+    ntile(net_export, 3),
+    levels = c(1, 2, 3), labels = c("Export - low", "Export - medium", "Export - high")))
+
+net_importers_1986 <- importers_1986 %>%
+  left_join(., exporters_1986 %>%
+              select(-quartile),
+            by = c("receiver_iso3" = "sender_iso3" )) %>%
+  mutate(export_value = ifelse(is.na(export_value), 0, export_value),
+         net_import = import_value-export_value) %>%
+  filter(net_import > 0) %>%
+  select(-c(quartile, export_value, import_value)) %>%
+  mutate(import_level = factor(
+    ntile(net_import, 3),
+    levels = c(1, 2, 3), labels = c("Import - low", "Import - medium", "Import - high")))
+
+trade_factor <- union(levels(net_exporters_1986$export_level), levels(net_importers_1986$import_level))
+
+nodelist_1986 <- c(trade_map_1986$sender_iso3, trade_map_1986$receiver_iso3) %>%
+  unique() %>%
+  as_tibble() %>%
+  rename("node_iso3" = 1) %>%
+  left_join(., wrld_simpl@data %>%
+              select("ISO3", "LON", "LAT") %>%
+              rename("node_iso3" = "ISO3",
+                     "node_long" = "LON",
+                     "node_lat" = "LAT"),
+            by = "node_iso3") %>%
+  left_join(., net_exporters_1986 %>%
+              rename("trade" = export_level),
+            by = c("node_iso3" = "sender_iso3")) %>%
+  left_join(., net_importers_1986 %>%
+              rename("trade" = import_level),
+            by = c("node_iso3" = "receiver_iso3")) %>%
+  mutate(trade = ifelse(is.na(trade.x),
+                        as.character(trade.y),
+                        as.character(trade.x)),
+         trade = ifelse(is.na(trade), "NA", trade),
+         trade = factor(trade, levels = trade_factor)) %>%
+  select(node_iso3, node_long, node_lat, trade)
+
+node_bounds <- nodelist_1986 %>%
+  select(node_long, node_lat) %>%
+  drop_na %>%
+  sp::SpatialPointsDataFrame(coords = .[,1:2],
+                             data = .) %>%
+  sp::bbox() * 1.1
+
+ggplot() +
+  geom_polygon(data = map_data(map = "world") %>%
+                 filter(region != "Antarctica"),
+               aes(x = long,
+                   y = lat,
+                   group = group,
+                   fill = region),
+               show.legend = F,
+               alpha = 0.25,
+               colour = "white") +
+  geom_segment(data = trade_map_1986,
+               aes(x = sender_long, xend = receiver_long,
+                   y = sender_lat, yend = receiver_lat),
+               size = 0.05,
+               alpha = 0.5) +
+  geom_point(data = nodelist_1986,
+             aes(x = node_long,
+                 y = node_lat,
+                 colour = trade)) +
+  theme_bw() +
+  theme(axis.line = element_line(),
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.background = element_blank(),
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        axis.text = element_blank()) +
+  coord_map("polyconic",
+            xlim = c(node_bounds["node_long", "min"],
+                     node_bounds["node_long", "max"]),
+            ylim = c(node_bounds["node_lat", "min"],
+                     node_bounds["node_lat", "max"]))
+```
 
 ## Community structure
 This introduces the idea of communities within the network. We use a further package `linkcomm` that utilises the `network` object to generate these communities. This step will take a while (~30 mins) the first time due to the calculation of the communities but we save the data which means subsequent times the analysis is run that they do not need to be recalculated unless the file is removed.
